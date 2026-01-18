@@ -174,9 +174,11 @@ async def refresh_namedays(x_api_key: str = Header()):
     if not data:
         raise HTTPException(status_code=500, detail="Failed to fetch data from Wikipedia")
     
-    # Save to KV if available (Vercel), otherwise to file
+    # Save to KV if available, otherwise to file (only if not on Vercel)
     if kv:
         kv.set(KV_KEY, json.dumps(data, ensure_ascii=False))
+    elif os.environ.get("VERCEL"):
+        raise HTTPException(status_code=500, detail="KV store not configured. Add Upstash Redis in Vercel Storage.")
     else:
         with open(JSON_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
