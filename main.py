@@ -11,6 +11,15 @@ from fetch import fetch_html, parse_tables
 BASE_DIR = Path(__file__).parent
 load_dotenv(BASE_DIR / ".env")
 
+# Upstash Redis (via Vercel Marketplace)
+kv = None
+if os.environ.get("KV_REST_API_URL"):
+    from upstash_redis import Redis
+    kv = Redis(
+        url=os.environ["KV_REST_API_URL"],
+        token=os.environ["KV_REST_API_TOKEN"]
+    )
+
 app = FastAPI(
     title="Swedish Nameday API",
     description="API for Swedish namedays (namnsdagar)",
@@ -19,10 +28,18 @@ app = FastAPI(
 
 JSON_PATH = BASE_DIR / "svenska_namnsdagar.json"
 API_KEY = os.environ.get("NAMEDAY_API_KEY", "")
+KV_KEY = "namedays"
 
 
 def load_namedays():
-    """Load nameday data from JSON file"""
+    """Load nameday data from KV store, fallback to JSON file"""
+    # Try KV first (on Vercel)
+    if kv:
+        data = kv.get(KV_KEY)
+        if data:
+            return data if isinstance(data, dict) else json.loads(data)
+    
+    # Fallback to JSON file
     try:
         with open(JSON_PATH, "r", encoding="utf-8") as f:
             return json.load(f)
@@ -157,8 +174,12 @@ async def refresh_namedays(x_api_key: str = Header()):
     if not data:
         raise HTTPException(status_code=500, detail="Failed to fetch data from Wikipedia")
     
-    with open(JSON_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+    # Save to KV if available (Vercel), otherwise to file
+    if kv:
+        kv.set(KV_KEY, json.dumps(data, ensure_ascii=False))
+    else:
+        with open(JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
     
     NAMEDAYS = data
     return {
